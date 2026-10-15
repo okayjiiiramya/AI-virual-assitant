@@ -1,0 +1,137 @@
+import uploadOnCloudinary from "../config/cloudinary.js"
+import grokResponse from "../grok.js"
+import User from "../models/user.model.js"
+import moment from "moment"
+import https from "https"
+
+// Fetch first YouTube video ID for a search query (no API key needed)
+export const getYoutubeVideoId = async (req, res) => {
+    try {
+        const { query } = req.query;
+        if (!query) return res.status(400).json({ error: "query required" });
+
+        const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+
+        const html = await new Promise((resolve, reject) => {
+            https.get(searchUrl, {
+                headers: {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept-Language": "en-US,en;q=0.9"
+                }
+            }, (response) => {
+                let data = "";
+                response.on("data", chunk => data += chunk);
+                response.on("end", () => resolve(data));
+            }).on("error", reject);
+        });
+
+        // Extract first video ID from YouTube's search results page
+        const match = html.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
+        if (match && match[1]) {
+            return res.json({ videoId: match[1] });
+        }
+        return res.status(404).json({ error: "No video found" });
+    } catch (error) {
+        console.error("YouTube fetch error:", error.message);
+        return res.status(500).json({ error: "Failed to fetch video ID" });
+    }
+}
+
+export const getCurrentUser = async (req, res) => {
+    try {
+        const userId = req.userId
+        const user = await User.findById(userId).select("-password")
+        if (!user) {
+            return res.status(400).json({ message: "user not found" })
+        }
+        return res.status(200).json(user)
+    } catch (error) {
+        return res.status(400).json({ message: "get current user error" })
+    }
+}
+
+export const updateAssistant = async (req, res) => {
+    try {
+        const { assistantName, imageUrl } = req.body
+        let assistantImage;
+        if (req.file) {
+            assistantImage = await uploadOnCloudinary(req.file.path)
+        } else {
+            assistantImage = imageUrl
+        }
+
+        const user = await User.findByIdAndUpdate(req.userId, {
+            assistantName, assistantImage
+        }, { new: true }).select("-password")
+        return res.status(200).json(user)
+
+    } catch (error) {
+        return res.status(400).json({ message: "updateAssistantError user error" })
+    }
+}
+
+export const askToAssistant = async (req, res) => {
+    try {
+        const { command } = req.body
+        const user = await User.findById(req.userId);
+        user.history.push(command)
+        user.save()
+        const userName = user.name
+        const assistantName = user.assistantName
+
+        // Call Grok API — it already returns a parsed JSON object
+        const result = await grokResponse(command, assistantName, userName)
+
+        console.log(result)
+        const type = result.type
+
+        switch (type) {
+            case 'get-date':
+                return res.json({
+                    type,
+                    userInput: result.userInput,
+                    response: `current date is ${moment().format("YYYY-MM-DD")}`
+                });
+            case 'get-time':
+                return res.json({
+                    type,
+                    userInput: result.userInput,
+                    response: `current time is ${moment().format("hh:mm A")}`
+                });
+            case 'get-day':
+                return res.json({
+                    type,
+                    userInput: result.userInput,
+                    response: `today is ${moment().format("dddd")}`
+                });
+            case 'get-month':
+                return res.json({
+                    type,
+                    userInput: result.userInput,
+                    response: `today is ${moment().format("MMMM")}`
+                });
+            case 'google-search':
+            case 'youtube-search':
+            case 'youtube-play':
+            case 'youtube-open':
+            case 'general':
+            case 'calculator-open':
+            case 'instagram-open':
+            case 'facebook-open':
+            case 'weather-show':
+            case 'website-open':
+                return res.json({
+                    type,
+                    userInput: result.userInput,
+                    response: result.response,
+                });
+
+            default:
+                return res.status(400).json({ response: "I didn't understand that command." })
+        }
+
+    } catch (error) {
+        return res.status(500).json({ response: "ask assistant error" })
+    }
+}
+
