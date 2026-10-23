@@ -1,3 +1,4 @@
+
 # 🤖 Build Your Own AI Virtual Assistant using MERN Stack
 
 An AI-powered Virtual Assistant built using the **MERN Stack** (**MongoDB, Express.js, React.js, Node.js**) that provides intelligent conversations, user authentication, and a modern responsive interface. This project is designed to simulate a real-world AI assistant with smooth interaction and scalable architecture.
